@@ -1,83 +1,49 @@
-"""Emergent object storage helper — one session_key per process."""
-import os
+"""Local filesystem storage helper for uploads."""
 import logging
-import requests
+import os
 import uuid
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 APP_NAME = "scale-india"
-
-_storage_key: str | None = None
-
-
-def init_storage() -> str | None:
-    global _storage_key
-    if _storage_key:
-        return _storage_key
-    emergent_key = os.environ.get("EMERGENT_LLM_KEY")
-    if not emergent_key:
-        logger.warning("EMERGENT_LLM_KEY not set — storage uploads disabled.")
-        return None
-    try:
-        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": emergent_key}, timeout=30)
-        resp.raise_for_status()
-        _storage_key = resp.json()["storage_key"]
-        logger.info("Object storage initialised.")
-        return _storage_key
-    except Exception as e:
-        logger.error(f"Storage init failed: {e}")
-        return None
+STORAGE_ROOT = Path(
+    os.environ.get("FILE_STORAGE_ROOT", Path(__file__).parent / "storage")
+).resolve()
 
 
-def reset_storage_key():
-    global _storage_key
-    _storage_key = None
+def init_storage() -> str:
+    STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
+    logger.info("File storage initialised at %s", STORAGE_ROOT)
+    return str(STORAGE_ROOT)
+
+
+def _resolve_storage_path(path: str) -> Path:
+    relative_path = Path(path)
+    target = (STORAGE_ROOT / relative_path).resolve()
+    if STORAGE_ROOT not in target.parents and target != STORAGE_ROOT:
+        raise RuntimeError("Invalid storage path")
+    return target
 
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    if not key:
-        raise RuntimeError("Storage not initialised")
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data,
-        timeout=120,
-    )
-    if resp.status_code == 403:
-        reset_storage_key()
-        key = init_storage()
-        resp = requests.put(
-            f"{STORAGE_URL}/objects/{path}",
-            headers={"X-Storage-Key": key, "Content-Type": content_type},
-            data=data,
-            timeout=120,
-        )
-    resp.raise_for_status()
-    return resp.json()
+    init_storage()
+    target = _resolve_storage_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return {
+        "path": Path(path).as_posix(),
+        "size": len(data),
+        "content_type": content_type,
+    }
 
 
 def get_object(path: str) -> tuple[bytes, str]:
-    key = init_storage()
-    if not key:
-        raise RuntimeError("Storage not initialised")
-    resp = requests.get(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key},
-        timeout=60,
-    )
-    if resp.status_code == 403:
-        reset_storage_key()
-        key = init_storage()
-        resp = requests.get(
-            f"{STORAGE_URL}/objects/{path}",
-            headers={"X-Storage-Key": key},
-            timeout=60,
-        )
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+    init_storage()
+    target = _resolve_storage_path(path)
+    if not target.exists():
+        raise FileNotFoundError(path)
+    return target.read_bytes(), "application/octet-stream"
 
 
 def build_upload_path(kind: str, ext: str) -> str:
