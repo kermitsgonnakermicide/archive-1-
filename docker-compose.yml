@@ -1,0 +1,41 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: scale_india
+      JWT_SECRET: change-me
+      PUBLIC_BASE_URL: http://localhost:3001
+      FILE_STORAGE_ROOT: /app/storage
+      CORS_ORIGINS: http://localhost:3001
+      ADMIN_EMAIL: scalesupportteam2@gmail.com
+      ADMIN_PASSWORD: SCALEdaddySALLU67
+    volumes:
+      - backend_storage:/app/storage
+    expose:
+      - "8001"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_BACKEND_URL: ""
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3001:80"
+
+volumes:
+  mongo_data:
+  backend_storage:

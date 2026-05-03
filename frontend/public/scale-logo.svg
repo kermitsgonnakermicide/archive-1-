@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 110" role="img" aria-labelledby="title desc">
+  <title id="title">SCALE India logo</title>
+  <desc id="desc">Deep red rounded rectangle with SCALE wordmark in white and gold.</desc>
+  <rect width="320" height="110" rx="20" fill="#5b0f19"/>
+  <text x="28" y="72" font-family="Georgia, 'Times New Roman', serif" font-size="50" font-weight="700" fill="#ffffff">sc</text>
+  <text x="114" y="72" font-family="Georgia, 'Times New Roman', serif" font-size="50" font-weight="700" fill="#d4a63c">AL</text>
+  <text x="196" y="72" font-family="Georgia, 'Times New Roman', serif" font-size="50" font-weight="700" fill="#ffffff">e</text>
+</svg>
