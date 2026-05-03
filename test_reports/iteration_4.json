@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 4 — Object-storage scholarship-proof upload + admin download verified end-to-end. Backend pytest 27/27 PASSED (added 7 new tests: upload success, ext rejection, oversize rejection, unauth/non-admin/404 download, content-persistence). Frontend e2e: file picker (proof-file-pick / proof-file-input / proof-file-attached / proof-file-clear) works, scholarship form POSTs proof_file_id, admin Submissions tab renders 'View proof file' (download-proof-{id}) for submissions with proof_file_id, click triggers fetch /api/admin/files/{id} with Bearer token returning 200 + application/pdf. Content persistence (admin PUT → unauth GET) confirmed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/payments/status/{session_id}", "issue": "Pre-existing graceful Stripe fallback (note='pending_external_confirmation') — same as iteration_3, not in this iteration's scope."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "storage_service.put_object/get_object correctly auto-reset _storage_key on 403 and re-init — good resilience for the emergent objstore session-key model.",
+    "/api/upload/scholarship-proof returns 503 when storage is unavailable instead of 500, with a user-friendly message hinting the link-paste fallback. Tests accommodate that with pytest.skip on 503 — appropriate.",
+    "FileRef has is_deleted flag and admin_download_file filters {is_deleted: False} — soft-delete-ready; consider exposing a deletion endpoint if/when admin needs to purge a file.",
+    "AdminPage downloadFile uses fetch(blob) + window.open(blobUrl) instead of <a download> — works but bypasses the Content-Disposition filename. Consider adding an <a> with download attribute for proper filename in the saved file. Minor UX.",
+    "EventScholarshipPage: file-size pre-check on client (10MB) and re-uploading after clear works; but if upload succeeds and form submission then fails, the uploaded blob orphans in storage. Acceptable for MVP — could be GC'd later.",
+    "AppContext 60s polling + window-focus refetch is good for site-wide admin propagation; consider exponential backoff if the tab is hidden long-term to reduce load.",
+    "server.py is now ~877 lines — recommend splitting into routers/uploads.py, routers/payments.py, routers/admin.py for maintainability.",
+    "@app.on_event('startup'/'shutdown') still uses deprecated APIs — migrate to lifespan context manager."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (27/27 pytest)", "frontend": "100% (file-upload + admin-download flow verified)"},
+  "test_credentials": "Admin: scalesupportteam2@gmail.com / SCALEdaddySALLU67 (used successfully)",
+  "seed_data_creation": "Tests upload a tiny TEST_proof.pdf via UI (TEST_UI_Student) and via API (TEST_proof.pdf) — these create file_refs entries + event_scholarship submissions tagged TEST_*. Not auto-cleaned. No production data touched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 features ALL verified. Backend: 7 new tests in TestUploadAndAdminDownload + TestContentPersistence in /app/backend/tests/backend_test.py. UI flow at /events/{eventId}/scholarship: data-testids proof-file-pick, proof-file-input, proof-file-attached, proof-file-clear all wired correctly. Admin Submissions tab shows download-proof-{submission_id} buttons; clicking triggers fetch /api/admin/files/{file_id} with Bearer + opens blob in new tab (Playwright popup detection is unreliable for fetch->window.open patterns; verify via response capture instead). Storage backend (emergent objstore) returned 200 throughout testing — no 503s observed. Content polling: not directly UI-instrumented in this run since hero_label persistence is already verified at API level (PUT /content as admin → GET /content unauth returns updated value).",
+  "rca of the issue": "N/A — no bugs found."
+}

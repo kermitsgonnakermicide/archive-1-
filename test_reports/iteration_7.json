@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 7+8 combined — full pytest suite (50 tests) passed, and frontend UX verified end-to-end. Backend: all 6 Iteration-7 PUT validation tests (ExtraField Literal types + registration_mode + team_size checks + POST Pydantic 422) and 3 new Iteration-8 registration_open gate tests (defaults, PUT toggle, POST 403 when closed + 200 when re-opened) pass. Frontend: admin Events tab exposes row-regopen-{i}, row-closed-msg-{i} (revealed on toggle-off), dirty/Save/Discard (row-dirty / row-save / row-reset) all work; saving clears the dirty banner and button reads 'Saved'. Public /events/{id}: when registration_open=true, the reg form renders (reg-name, reg-submit); when false, data-testid='registration-closed' card renders with the closed message + 'Apply for Scholarship' button and the form testids are absent. Homepage cards still show 'Event Details' buttons regardless of state. Event state restored via finally blocks in both pytest and Playwright.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/events (GET list)", "issue": "Situational Business Challenge returns registration_open=null (field not backfilled in DB). Pydantic default isn't re-applied on read because legacy docs predate the field. Frontend currently treats null as 'not strictly false' so the form still renders, but it's inconsistent. Recommend a one-time migration to set registration_open=true on all legacy event docs, or coerce in the list/detail serializer."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EventDetailPage header pill", "issue": "When registration_open=false, the hero header still displays 'LIVE · REGISTRATION OPEN' pill while the right-hand card correctly shows 'REGISTRATION CLOSED'. The status pill should also flip to 'REGISTRATION CLOSED' (or simply omit the 'REGISTRATION OPEN' suffix) to stay consistent with the card.", "selector": "header badge next to event title", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Backfill registration_open=true on legacy event documents (or coerce None->True in the event serializer) so /api/events is fully consistent.",
+    "Update EventDetailPage header status pill to reflect registration_open (flip to 'REGISTRATION CLOSED' when false)."
+  ],
+  "critical_code_review_comments": [
+    "Nice — PUT /api/events/{id} now reuses the same validation path as POST (Literal types, team_size bounds, registration_mode enum). Consider a single Pydantic `EventUpdate` model to centralise this so future fields don't drift.",
+    "The registration_open gate in register_for_event correctly returns 403 and short-circuits before the Stripe/email side-effects — good ordering.",
+    "EventDetailPage: 'registration-closed' block is rendered cleanly before the dynamic form; confirm the mobile layout of the card vs. form swap is equally clean (not tested)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (50/50)", "frontend": "100% (all iter 7+8 UX flows verified)"},
+  "test_credentials": "Admin scalesupportteam2@gmail.com / SCALEdaddySALLU67 (working).",
+  "seed_data_creation": "No new seeds. Tests prefix TEST_; event state (registration_open, message, extras, team sizes, mode) restored in finally blocks on both Mock Stock and Situational.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py now has 50 tests incl. TestIteration7PutEventValidation (6) and TestIteration8RegistrationOpenGate (3). Mock Stock event id: c6aedeb8-7ccd-4c6f-a258-5bcb51ad1b95 (title 'Mock Stock Market & Investment Challenge'). Situational id: 7b410813-39be-4899-8a27-31947ab18e2c has registration_open=null in DB — keep in mind if a future test asserts True on non-Mock-Stock events. All tests restore state via finally blocks; if a test ever fails mid-way, spot-check that Mock Stock is back to registration_open=true with default extras/mode/team sizes.",
+  "rca of the issue": "N/A — no blocking bugs. Minor inconsistency (registration_open=null on Situational) RCA: legacy MongoDB doc predates the field and GET /events returns the raw dict (post ObjectId strip) without re-validating through EventItem, so Pydantic's default True is not applied. Mitigation: either migrate docs (one-time `$set`) or wrap the GET responses in EventItem(**doc).model_dump()."
+}

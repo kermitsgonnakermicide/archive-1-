@@ -1,0 +1,256 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 0 0% 100%;
+        --foreground: 0 0% 6%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 6%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 6%;
+        --primary: 355 83% 38%; /* crimson */
+        --primary-foreground: 0 0% 100%;
+        --secondary: 40 20% 96%;
+        --secondary-foreground: 0 0% 6%;
+        --muted: 40 20% 96%;
+        --muted-foreground: 0 0% 38%;
+        --accent: 40 78% 45%; /* gold */
+        --accent-foreground: 0 0% 6%;
+        --destructive: 355 83% 38%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 88%;
+        --input: 0 0% 88%;
+        --ring: 355 83% 38%;
+        --radius: 0.5rem;
+
+        /* SCALE brand tokens — editable by admin via runtime <style> */
+        --scale-crimson: #B01020;
+        --scale-darkred: #4A0008;
+        --scale-white: #FFFFFF;
+        --scale-offwhite: #FAF8F5;
+        --scale-cream: #F4ECD8;
+        --scale-black: #0F0F0F;
+        --scale-gold: #C9931A;
+        --scale-goldlight: #F5C842;
+    }
+}
+
+@layer base {
+    * { @apply border-border; }
+    html { scroll-behavior: smooth; }
+    body {
+        margin: 0;
+        font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+        background: var(--scale-offwhite);
+        color: var(--scale-black);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    h1, h2, h3, h4, h5, .font-display {
+        font-family: 'Playfair Display', Georgia, serif;
+        letter-spacing: -0.01em;
+    }
+    ::selection { background: var(--scale-gold); color: var(--scale-black); }
+}
+
+/* Reveal — gentle fade-in on mount, never below opacity 1 if animation fails */
+.reveal {
+    animation: scl-fade-up 0.7s cubic-bezier(.2,.7,.3,1) both;
+}
+@keyframes scl-fade-up {
+    0% { opacity: 0; transform: translateY(14px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .reveal { animation: none; }
+}
+
+/* Gold border accent */
+.gold-left {
+    border-left: 4px solid var(--scale-gold);
+    padding-left: 1.25rem;
+}
+.gold-top {
+    border-top: 3px solid var(--scale-gold);
+}
+.crimson-top {
+    border-top: 3px solid var(--scale-crimson);
+}
+
+/* Pillar card */
+.pillar-card {
+    background: transparent;
+    color: #fff;
+    padding: 2rem 1.5rem;
+    border: 1px solid rgba(255,255,255,0.12);
+    transition: border-color 0.35s ease, transform 0.35s ease, background 0.35s ease;
+    position: relative;
+    overflow: hidden;
+}
+.pillar-card::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 3px;
+    background: var(--scale-gold);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.4s ease;
+}
+.pillar-card:hover {
+    background: rgba(255,255,255,0.03);
+    transform: translateY(-4px);
+}
+.pillar-card:hover::after { transform: scaleX(1); }
+
+/* Serious button variants */
+.btn-crimson {
+    background: var(--scale-crimson);
+    color: #fff;
+    padding: 0.8rem 1.6rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: background 0.25s ease, transform 0.25s ease;
+    display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.btn-crimson:hover { background: var(--scale-darkred); transform: translateY(-1px); }
+.btn-outline-light {
+    background: transparent;
+    color: #fff;
+    border: 1.5px solid #fff;
+    padding: 0.8rem 1.6rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: all 0.25s ease;
+    display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.btn-outline-light:hover { background: #fff; color: var(--scale-darkred); }
+.btn-outline-dark {
+    background: transparent;
+    color: var(--scale-black);
+    border: 1.5px solid var(--scale-black);
+    padding: 0.8rem 1.6rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: all 0.25s ease;
+    display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.btn-outline-dark:hover { background: var(--scale-black); color: #fff; }
+.btn-gold {
+    background: var(--scale-gold);
+    color: var(--scale-black);
+    padding: 0.8rem 1.6rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    transition: background 0.25s ease, transform 0.25s ease;
+    display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.btn-gold:hover { background: var(--scale-goldlight); transform: translateY(-1px); }
+
+/* Subtle grain for dark red sections */
+.dark-red-section {
+    background: var(--scale-darkred);
+    color: #fff;
+    position: relative;
+}
+.dark-red-section::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image:
+        radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 3px 3px;
+    pointer-events: none;
+    opacity: 0.6;
+}
+.crimson-section { background: var(--scale-crimson); color: #fff; }
+
+/* Label badge */
+.label-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--scale-goldlight);
+    border: 1px solid var(--scale-goldlight);
+    padding: 0.35rem 0.7rem;
+    font-weight: 600;
+}
+
+/* Section heading */
+.eyebrow {
+    font-size: 0.7rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--scale-crimson);
+    margin-bottom: 0.75rem;
+}
+.eyebrow-gold {
+    font-size: 0.7rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--scale-gold);
+    margin-bottom: 0.75rem;
+}
+
+/* Nav underline */
+.nav-link {
+    position: relative;
+    padding: 4px 0;
+    color: rgba(255,255,255,0.85);
+    transition: color 0.2s ease;
+    font-size: 0.92rem;
+    letter-spacing: 0.03em;
+}
+.nav-link:hover { color: #fff; }
+.nav-link::after {
+    content: '';
+    position: absolute; left: 0; bottom: -4px; height: 2px; width: 0;
+    background: var(--scale-gold);
+    transition: width 0.3s ease;
+}
+.nav-link:hover::after { width: 100%; }
+
+/* Pricing card */
+.price-card {
+    border: 1.5px solid #e5e5e5;
+    padding: 2rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: #fff;
+}
+.price-card:hover { border-color: var(--scale-crimson); }
+.price-card.active {
+    border-color: var(--scale-crimson);
+    box-shadow: 0 0 0 3px rgba(176,16,32,0.15);
+}
+
+/* Scholarship callout */
+.scholarship-box {
+    background: #FAF8F5;
+    border-left: 5px solid var(--scale-gold);
+    padding: 1.5rem 1.75rem;
+}
+
+/* Container max widths */
+.max-container { max-width: 1240px; margin-left: auto; margin-right: auto; padding-left: 1.5rem; padding-right: 1.5rem; }
+
+@media (min-width: 1024px) {
+  .max-container { padding-left: 2.5rem; padding-right: 2.5rem; }
+}
+
+/* Focus rings matched to brand */
+*:focus-visible { outline: 2px solid var(--scale-gold); outline-offset: 2px; }
+
+/* Hero ticker/line motif */
+.hr-gold {
+    width: 80px;
+    height: 3px;
+    background: var(--scale-gold);
+    display: inline-block;
+}

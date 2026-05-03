@@ -1,0 +1,45 @@
+/* SCALE — app-level additions */
+.App { min-height: 100vh; }
+
+/* Hero background with very subtle blood/crimson/dark-red gradient */
+.hero-bg {
+    background:
+        radial-gradient(900px 500px at 85% 12%, rgba(201,147,26,0.10), transparent 60%),
+        radial-gradient(700px 500px at 15% 90%, rgba(176,16,32,0.35), transparent 65%),
+        linear-gradient(140deg, #2E0005 0%, #4A0008 35%, #6E0A18 65%, #3A0007 100%);
+    position: relative;
+    overflow: hidden;
+}
+.hero-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 72px 72px;
+    opacity: 0.5;
+    pointer-events: none;
+}
+.hero-bg::after {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 4px 4px;
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+.logo-img { image-rendering: auto; }
+
+/* Navbar backdrop */
+.navbar-solid {
+    background: var(--scale-black);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Footer */
+.footer-black {
+    background: var(--scale-black);
+    color: rgba(255,255,255,0.85);
+}

@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 10/12 (post-registration event hub + Razorpay + inline page controls) — 23 new pytest tests added covering materials gating (paid/unpaid/invalid/admin), material PUT, file upload + gated download, student submissions (create→update, gating, mine), admin submissions list + CSV export, Razorpay 503 guards (create-order, verify), and public-base-url email links. 1 real bug found and fixed in backend helper. Frontend hub flows (paid view, unpaid card, notfound, no-reg redirect, submission create/update/persist, Razorpay-not-configured toast) all verified via Playwright.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/events/{id}/materials GET & /api/events/{id}/files/{id}/download", "issue": "FIXED — _is_admin_request() at server.py:1122 was checking payload.get('is_admin') but create_token() emits role='admin'. Admin could NOT bypass the paid-reg gate on GET materials / download endpoints. Now accepts both role=='admin' and is_admin truthy."},
+      {"endpoint": "/api/payments/create-order", "issue": "Idempotency path (line ~1466) reuses existing 'created' order and returns key_id from env WITHOUT calling _get_razorpay_client(). If keys were later cleared, this returns 200 with empty key_id instead of 503. Today it returns 503 correctly only because no prior order exists; edge-case only."},
+      {"endpoint": "/api/auth/login", "issue": "Response body field is `token` (not `access_token`). Documented for any external integrator; not a bug, but test fixtures should tolerate both."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EventRegisteredPage::ReadyView", "issue": "React console warning 'Each child in a list should have a unique key prop' — one of the rendered lists (likely links or documents map) is missing a key. Non-blocking but noisy in prod.", "selector": "[data-testid='registered-page']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10_event_hub_and_razorpay.py",
+    "/app/test_reports/pytest/iter10_results.xml"
+  ],
+  "action_items": [
+    "(Done) Backend _is_admin_request key mismatch fixed (role=='admin' now recognised).",
+    "(Nice-to-have) Add `key={d.file_id}` / `key={l.id}` on the links/documents .map() inside EventRegisteredPage ReadyView to silence React warning.",
+    "(Nice-to-have) In /api/payments/create-order idempotency branch, still call _get_razorpay_client() up-front so endpoint returns 503 consistently when keys are cleared mid-lifecycle."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1122 _is_admin_request — fixed here but the pattern should be replaced by a small reusable dep (e.g., optional_admin) so future dual-gated endpoints don't re-implement JWT decoding.",
+    "server.py:1278 upload_submission_file accepts reg_id as a query param on POST — while gated by _require_paid_registration, an admin wanting to upload on a student's behalf has no bypass. Acceptable but worth documenting.",
+    "server.py:1392 CSV export does not escape CR/LF inside student_name/school (only text_response is sanitised). Malicious name with newline could break rows in the admin download. Apply same `replace('\\r',' ').replace('\\n',' ')` to every free-text cell.",
+    "EventRegisteredPage: missing React key props — noisy warning.",
+    "Payment 503 message exposes env var names directly (RAZORPAY_KEY_ID / _SECRET) to end users via toast. Fine for SCALE admin but consider a generic message for students."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (fixed _is_admin_request — now accepts role='admin')",
+    "/app/backend/tests/test_iteration10_event_hub_and_razorpay.py (new)"
+  ],
+  "success_rate": {"backend": "100% (23/23 iteration-10 tests pass after fix)", "frontend": "~95% — 6/6 critical hub flows + Razorpay toast verified; admin EventHubPanel UI path not end-to-end clicked due to a browser session hiccup but backed by direct API coverage"},
+  "test_credentials": "Admin scalesupportteam2@gmail.com / SCALEdaddySALLU67 (auth /api/auth/login returns field `token`, not `access_token`).",
+  "seed_data_creation": "Created several TEST_ unpaid registrations during testing (all with TEST_/feunpaid@example.com emails). Uploaded one TEST_brief.pdf file; removed from materials documents list at end. Seed reg 27ed2ca5 and event c6aedeb8 materials preserved (2 links + original notes intact, no TEST links or docs left). Seed submission was updated with test text (last-write wins by design of create-or-update endpoint).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_iteration10_event_hub_and_razorpay.py covers all post-reg hub + Razorpay guard paths. Seed paid reg: event_id=c6aedeb8-7ccd-4c6f-a258-5bcb51ad1b95, reg_id=27ed2ca5-aff2-47f1-9bb5-7fea5457f8b6 — payment_status=paid in mongo. Admin login returns `token` field (not access_token). Materials payload schema: {notes, links:[{id,label,url}], documents:[{id,label,file_id,filename,content_type,size}], updated_at}. Submissions: one per (event_id, reg_id) — second POST updates; response includes action: 'created'|'updated'. Frontend testids: registered-page, registered-notfound, registered-unpaid, registered-complete-payment-btn, registered-notes, registered-links, registered-documents, registered-doc-{fid}, registered-link-{lid}, submission-form, submission-text, submission-attach-btn, submission-submit-btn, submission-file-{fid}. Public pages collection is empty — /p/:slug admin inline controls could not be tested live until admin creates a page.",
+  "rca of the issue": "BUG: _is_admin_request() in server.py used payload.get('is_admin') while create_token() emits role='admin' — an inconsistent key causing ALL admin requests to GET /materials (no reg_id) and download event files to 401. RCA: developer wrote the helper assuming an is_admin boolean claim that never existed in this codebase. FIX: changed check to `payload.get('role') == 'admin' or bool(payload.get('is_admin'))`. VALIDATION: TestMaterialsGating::test_admin_can_read_without_reg, TestMaterialsAdminWrite::test_put_accepts_and_persists, TestEventFiles::test_upload_and_gated_download (admin branch) all now pass."
+}

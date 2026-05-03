@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 5 verified — 31/31 backend tests pass (added 4 new: TestIteration5NewContentFields x2, TestIteration5MockStockIndividual x2). All 18 new editable SiteContent fields (pillars/whatis/why/events/story/vision/contact eyebrows+headlines, hero_ticker, 5 event_detail_* keys) are exposed by GET /api/content, persist via PUT /api/content (admin), and propagate to unauth GET. Mock Stock event's `about` now contains 'individual competition' / 'one student, one portfolio' (no 'Teams of 1-3') in both list and detail endpoints. Frontend homepage — every section eyebrow/headline renders from content (verified against /api/content values; uppercase variance is CSS text-transform only). Admin edit mode: login→toggle nav-edit-mode-toggle→click pillars H2 opens inline textarea with current content value. One content bug found: event_detail_eligibility_body DB value still says 'group competition (3-5 members per group)' contradicting the individual-event Mock Stock messaging.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/content", "issue": "event_detail_eligibility_body in DB is 'Open to students in grades 9-12. This is a group competition (3-5 members per group).' — contradicts the new individual-event messaging for Mock Stock. Backend default in server.py L193 is the correct 'individual competition — one student, one entry' but the iteration-5 backfill did not overwrite the pre-existing field value."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EventDetailPage (Mock Stock Market)", "issue": "Eligibility card shows 'This is a group competition (3-5 members per group)' directly under an About section that says 'individual competition — one student, one portfolio'. Directly contradictory on the same page.", "selector": "/events/{mock-stock-id} [data-testid=event-detail-page]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Update the event_detail_eligibility_body content value (admin PUT /api/content or re-run backfill) to e.g. 'Open to students in grades 9-12. This is an individual competition — one student, one entry.' so the eligibility copy on the Mock Stock detail page is consistent with the individual positioning.",
+    "Consider making eligibility per-event (events.eligibility field) rather than a single site-wide string, since different events will have different eligibility rules — the current single global eligibility_body creates contradictions like this."
+  ],
+  "critical_code_review_comments": [
+    "Global site-wide eligibility text on EventDetailPage is an architectural smell — it will always be wrong for at least one event. Prefer adding `eligibility` to the Event model and rendering that with a global fallback.",
+    "server.py is now ~900+ lines with 30+ content fields on SiteContent. Splitting into routers/content.py, routers/events.py, routers/admin.py would significantly help maintainability.",
+    "SiteContent keeps accumulating fields for every new editable string (18 new this iteration, many more in prior iterations). Consider a key/value content model (ContentItem{key, value}) with dynamic Editable(field='...') so new editable strings don't require schema changes.",
+    "No pytest cleanup for TEST_ prefixed registrations/submissions/files seeded by prior iterations — these accumulate in MongoDB across every test run. A teardown fixture using a tag-delete admin endpoint would keep the DB clean."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (31/31 pytest)", "frontend": "~90% — all new editable fields render correctly, inline editor opens on headline click in admin edit mode; content-level bug on eligibility body not a frontend fault"},
+  "test_credentials": "Admin: scalesupportteam2@gmail.com / SCALEdaddySALLU67 (used successfully)",
+  "seed_data_creation": "Backend tests seeded TEST_ prefixed registrations, event-scholarship submissions, contact submissions, and one TEST_proof.pdf via upload. PUT /api/content was temporarily mutated for new-field persistence test but restored in finally block. No production data touched.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 focus: 18 new editable content fields + Mock Stock individual conversion. All 31 pytest green. Frontend inline-edit flow: login as admin → /login route uses AuthPage data-testids (auth-email/auth-password/auth-submit); redirects to /admin on success. Nav edit toggle is [data-testid=nav-edit-mode-toggle] (only visible when logged in as admin). Clicking any Editable-wrapped element in edit mode opens inline <textarea> prefilled with current value; saving via Save button PUTs /api/content. Backend persistence verified at API level (admin PUT → unauth GET returns new value) in TestIteration5NewContentFields::test_put_new_fields_persists. Remaining issue: event_detail_eligibility_body DB content is stale ('group competition 3-5 members') — main agent to update via admin PUT or re-run backfill. All other iteration-4 and prior tests still pass (registrations, scholarship, payments with stripe fallback, contact, upload/admin download).",
+  "rca of the issue": "event_detail_eligibility_body field was newly added to the SiteContent model (server.py L193) with a default value of 'Open to students in grades 9-12. This is an individual competition — one student, one entry.' The default only applies when the content document is first created. The iteration-5 backfill script was supposed to populate the new field onto the existing 'main' content doc, but the value written to MongoDB was the old group-competition text rather than the individual-competition text. Fix: either (a) admin PUT /api/content overwriting event_detail_eligibility_body, or (b) re-run/patch the backfill script to use the individual wording. Reproduction: GET /api/content → check event_detail_eligibility_body. Currently returns 'Open to students in grades 9-12. This is a group competition (3-5 members per group).' on https://scale-talent-network.preview.emergentagent.com/api/content."
+}

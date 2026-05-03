@@ -1,0 +1,41 @@
+{
+  "summary": "E2E regression for SCALE+ removal + new event-detail/registration/payment/scholarship/inline-edit flows. Backend pytest: 17/18 PASSED (94%) — only failure is GET /api/payments/status/{session_id} returning 500 because Stripe says 'No such checkout.session' immediately after a session is successfully created. Frontend: all critical flows verified — homepage has no SCALE+, hero CTAs ('Explore Events'/'Our Story') exist with correct testids, event cards have event-details-btn-{id}, EventDetailPage has all reg-* testids and submits successfully (returns Complete Payment CTA), PaymentPage initiates Stripe checkout and redirects to checkout.stripe.com, EventScholarshipPage submits successfully, admin login → /admin, inline edit toggle (nav-edit-mode-toggle) present for admin and clicking hero-headline opens inline editor with 2 editable controls.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/payments/status/{session_id}", "issue": "Returns 500 immediately after a successful create-session. Stripe API: 'No such checkout.session: cs_test_...' surfaced as CheckoutError from emergentintegrations.payments.stripe.checkout.get_checkout_status. Reproduced via curl + pytest. Breaks /payment-success polling flow on frontend (console error visible). Likely a key/account mismatch or session-fetch bug in the integration's get_checkout_status path; same sk_test_emergent key creates the session but cannot fetch it.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Payment success page polling", "issue": "PaymentSuccessPage will receive 500 from /api/payments/status/{session_id} (see backend issue above) — user will see error/stuck state after returning from Stripe. Not directly tested end-to-end (Stripe is external) but root-cause confirmed via direct API call.", "affected_selectors": ["payment-success-status"]}
+    ],
+    "design_issues": [
+      {"screen": "Hero", "issues": ["Logo image renders large/uncropped on hero — visual polish only, no functional impact."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix GET /api/payments/status/{session_id} 500 — Stripe 'No such checkout.session'. Check whether the StripeCheckout instance in get_payment_status is using a different api_key/account vs create_checkout_session, or whether the session is being filtered by mode/account. Until this is fixed, /payment-success will not reflect paid status and the registration won't be marked paid.",
+    "Optional: spec mentions admin tab testids 'admin-tab-content', 'admin-tab-events', etc — actual code uses 'tab-content', 'tab-events', 'tab-registrations', etc. (see /app/frontend/src/pages/AdminPage.jsx lines 86-91). Either rename testids to match spec or update spec. Functionally fine."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~760 lines with payments + registrations + forms — strongly recommend splitting into routers (payments_router.py, registrations_router.py, forms_router.py) to stay maintainable.",
+    "get_payment_status creates a brand-new StripeCheckout instance every request — fine for correctness but inefficient. Consider caching at app state.",
+    "create_checkout_session and get_checkout_status both reach into emergentintegrations with the same api_key + webhook_url; if these need to match the original session's account, that's a third-party integration concern — needs investigation.",
+    "Good: server-side amount enforcement in /api/payments/create-session (never trusts frontend amount).",
+    "Good: SCALE+ keys are correctly $unset on every startup if leftover.",
+    "Good: registrations endpoint always saves DB record before email send (email failure won't break registration).",
+    "Good: idempotent guard in get_payment_status to only mark registration paid once.",
+    "Minor: @app.on_event('startup'/'shutdown') still deprecated — migrate to lifespan."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "94% (17/18 pytest)", "frontend": "~98% (every critical flow works; only payment-status polling will fail due to backend bug)"},
+  "test_credentials": "Admin: scalesupportteam2@gmail.com / SCALEdaddySALLU67 (used)",
+  "seed_data_creation": "None — backend self-seeds. Tests create TEST_-prefixed registrations, scholarship submissions, payment transactions; not auto-cleaned.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/backend_test.py covers 18 cases; only TestPayments::test_create_session_and_status fails (status retrieval). Frontend testid notes: admin tabs use 'tab-content/events/sessions/theme/registrations/submissions' (not 'admin-tab-*'). Event detail registration testids confirmed working: reg-name/school/grade/phone/email/parent-name/parent-phone/parent-email/submit + goto-payment-btn after success. PaymentPage uses payment-initiate-btn. Scholarship page uses schol-* prefix. Inline edit: nav-edit-mode-toggle on navbar (admin only), Editable wrapper on hero-headline opens an editor when in edit mode.",
+  "rca of the issue": "Stripe session lookup failure — RCA: After /api/payments/create-session creates a checkout session and returns a real cs_test_... session_id and a working https://checkout.stripe.com/... URL, immediately calling /api/payments/status/{session_id} fails with stripe._error.InvalidRequestError 'No such checkout.session'. Both endpoints construct StripeCheckout the same way (api_key=sk_test_emergent, webhook_url=...). Reproduction: POST registration, POST create-session, immediately GET /api/payments/status/{session_id} → 500. Mitigation: investigate emergentintegrations StripeCheckout.get_checkout_status — possible causes: (a) different Stripe account routing between create vs retrieve, (b) session being created in connected account vs retrieved on platform account, (c) an environment-specific shim. As a workaround the frontend should not fail hard if /payments/status returns 500 — show a 'we will email you confirmation' state instead."
+}
