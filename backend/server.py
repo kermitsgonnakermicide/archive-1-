@@ -1443,8 +1443,17 @@ import hmac as _hmac
 import hashlib as _hashlib
 
 
+def _cashfree_env() -> str:
+    raw = (os.environ.get("CASHFREE_ENV") or "TEST").strip().upper()
+    if raw in {"TEST", "SANDBOX"}:
+        return "TEST"
+    if raw in {"PROD", "PRODUCTION", "LIVE"}:
+        return "PROD"
+    return "TEST"
+
+
 def _cashfree_base_url() -> str:
-    env = (os.environ.get("CASHFREE_ENV") or "TEST").upper()
+    env = _cashfree_env()
     return "https://sandbox.cashfree.com" if env == "TEST" else "https://api.cashfree.com"
 
 
@@ -1502,7 +1511,7 @@ async def create_payment_order(body: CreateOrderRequest, request: Request):
             "amount_paise": amount_paise,
             "amount_inr": amount_inr,
             "currency": "INR",
-            "env": (os.environ.get("CASHFREE_ENV") or "TEST").upper(),
+            "env": _cashfree_env(),
             "registration_id": body.registration_id,
         }
 
@@ -1571,7 +1580,7 @@ async def create_payment_order(body: CreateOrderRequest, request: Request):
         "amount_paise": amount_paise,
         "amount_inr": amount_inr,
         "currency": "INR",
-        "env": (os.environ.get("CASHFREE_ENV") or "TEST").upper(),
+        "env": _cashfree_env(),
         "registration_id": body.registration_id,
     }
 

@@ -1,0 +1,47 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: scale-india-mongo
+    restart: unless-stopped
+    volumes:
+      - ${CASAOS_APPDATA}/mongo:/data/db
+
+  backend:
+    build:
+      context: ./backend
+    container_name: scale-india-backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      FILE_STORAGE_ROOT: /app/storage
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL}
+      CASHFREE_APP_ID: ${CASHFREE_APP_ID}
+      CASHFREE_SECRET_KEY: ${CASHFREE_SECRET_KEY}
+      CASHFREE_ENV: ${CASHFREE_ENV}
+      CASHFREE_WEBHOOK_SECRET: ${CASHFREE_WEBHOOK_SECRET}
+    volumes:
+      - ${CASAOS_APPDATA}/uploads:/app/storage
+    expose:
+      - "8001"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_BACKEND_URL: ""
+    container_name: scale-india-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${APP_PORT}:80"
+

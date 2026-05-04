@@ -7,9 +7,11 @@ import { Loader2 } from "lucide-react";
 export default function PaymentSuccessPage() {
   const [params] = useSearchParams();
   const sessionId = params.get("session_id");
+  const regId = params.get("reg");
   const navigate = useNavigate();
   const [status, setStatus] = useState("checking");
   const [info, setInfo] = useState(null);
+  const [eventId, setEventId] = useState(null);
   const attemptsRef = useRef(0);
 
   useEffect(() => {
