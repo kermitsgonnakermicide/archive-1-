@@ -14,6 +14,6 @@ No pre-seeded user accounts. Sign up via `/signup`.
 - Reply-to / admin notify recipient: `scalesupportteam2@gmail.com`.
 - Verify deliveries: `curl https://api.brevo.com/v3/smtp/statistics/events?limit=10 -H "api-key: $BREVO_API_KEY"`. Look for `event=delivered`.
 
-## Stripe
-- Test key: `sk_test_emergent` configured in backend `.env`.
-- Payment flow: `/payment/{registration_id}` → Stripe Checkout (UPI + Cards) → `/payment-success?session_id=...`.
+## Razorpay
+- Add your test `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in backend `.env` or `.env.casaos`.
+- Payment flow: `/payment/{registration_id}` -> Razorpay Checkout -> `/payment-success?session_id=...&reg=...`.

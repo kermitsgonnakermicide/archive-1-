@@ -1431,47 +1431,28 @@ async def admin_export_event_submissions(event_id: str, _admin: dict = Depends(r
 # internal bookkeeping still uses both.
 #
 # Flow:
-#   1) Backend creates an Order with Cashfree → receives `payment_session_id`.
-#   2) Frontend opens hosted drop-in (`cashfree-js` SDK) with the session id.
-#      Cashfree redirects back to `/payment-success?session_id=<order_id>&reg=<reg_id>`.
-#   3) Frontend polls `GET /api/payments/status/{order_id}` which fetches from
-#      Cashfree's Get-Order API to confirm actual payment status. When paid,
-#      marks the registration paid + sends confirmation emails.
-#   4) Webhook at `/api/webhook/cashfree` handles async reconciliation. Signature
-#      is HMAC-SHA256 over `timestamp + raw_body` (NOT just the body like Razorpay).
+#   1) Backend creates a Razorpay Order and returns the public key + order id.`r`n#   2) Frontend opens Razorpay Checkout via checkout.js.`r`n#   3) Frontend verifies the successful payment signature server-side.`r`n#   4) Frontend polls `GET /api/payments/status/{order_id}` for reconciliation.`r`n#   5) Webhook at `/api/webhook/razorpay` handles async reconciliation.
 import hmac as _hmac
 import hashlib as _hashlib
 
 
-def _cashfree_env() -> str:
-    raw = (os.environ.get("CASHFREE_ENV") or "TEST").strip().upper()
-    if raw in {"TEST", "SANDBOX"}:
-        return "TEST"
-    if raw in {"PROD", "PRODUCTION", "LIVE"}:
-        return "PROD"
-    return "TEST"
-
-
-def _cashfree_base_url() -> str:
-    env = _cashfree_env()
-    return "https://sandbox.cashfree.com" if env == "TEST" else "https://api.cashfree.com"
-
-
-def _cashfree_headers() -> dict:
-    app_id = os.environ.get("CASHFREE_APP_ID")
-    secret = os.environ.get("CASHFREE_SECRET_KEY")
-    if not app_id or not secret:
+def _razorpay_auth() -> tuple[str, str]:
+    key_id = (os.environ.get("RAZORPAY_KEY_ID") or "").strip()
+    key_secret = (os.environ.get("RAZORPAY_KEY_SECRET") or "").strip()
+    if not key_id or not key_secret:
         raise HTTPException(
             status_code=503,
-            detail="Payment gateway not configured. Admin must set CASHFREE_APP_ID and CASHFREE_SECRET_KEY.",
+            detail="Payment gateway not configured. Admin must set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.",
         )
-    return {
-        "x-client-id": app_id,
-        "x-client-secret": secret,
-        "x-api-version": "2023-08-01",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+    return key_id, key_secret
+
+
+def _razorpay_headers() -> dict:
+    return {"Content-Type": "application/json", "Accept": "application/json"}
+
+
+def _razorpay_api_url(path: str) -> str:
+    return f"https://api.razorpay.com/v1{path}"
 
 
 class CreateOrderRequest(BaseModel):
@@ -1480,8 +1461,9 @@ class CreateOrderRequest(BaseModel):
 
 @api_router.post("/payments/create-order")
 async def create_payment_order(body: CreateOrderRequest, request: Request):
-    """Create a Cashfree Order for a registration. Idempotent — if a 'created'
-    order already exists for this registration, return the same payment session."""
+    """Create a Razorpay Order for a registration. Idempotent - if a
+    created order already exists for this registration, return the same order."""
+    _ = request
     reg = await db.registrations.find_one({"id": body.registration_id}, {"_id": 0})
     if not reg:
         raise HTTPException(status_code=404, detail="Registration not found")
@@ -1494,70 +1476,56 @@ async def create_payment_order(body: CreateOrderRequest, request: Request):
 
     amount_inr = float(event.get("price_inr", 500.0))
     amount_paise = int(round(amount_inr * 100))
+    key_id, key_secret = _razorpay_auth()
 
-    # Warm credentials first so idempotency path can't return unconfigured gateway.
-    headers = _cashfree_headers()
-
-    # Idempotency: reuse an existing unpaid order if present.
     existing = await db.payment_transactions.find_one(
         {"registration_id": body.registration_id, "payment_status": {"$in": ["created", "initiated"]}},
         {"_id": 0},
     )
-    if existing and existing.get("session_id") and (existing.get("metadata") or {}).get("payment_session_id"):
-        meta = existing.get("metadata") or {}
+    if existing and existing.get("session_id"):
         return {
             "order_id": existing["session_id"],
-            "payment_session_id": meta.get("payment_session_id"),
+            "key_id": key_id,
             "amount_paise": amount_paise,
             "amount_inr": amount_inr,
             "currency": "INR",
-            "env": _cashfree_env(),
             "registration_id": body.registration_id,
+            "customer_name": reg.get("name") or "SCALE Participant",
+            "customer_email": reg.get("email") or "",
+            "customer_phone": reg.get("phone") or "",
         }
 
-    # Cashfree requires a merchant-generated order id ≤ 50 chars.
-    order_id = f"scale_{body.registration_id[:20]}_{uuid.uuid4().hex[:8]}"
-    origin = _resolve_public_origin(request)
-    return_url = f"{origin}/payment-success?session_id={order_id}&reg={body.registration_id}"
-    notify_url = f"{origin}/api/webhook/cashfree"
-
     payload = {
-        "order_id": order_id,
-        "order_amount": round(amount_inr, 2),
-        "order_currency": "INR",
-        "customer_details": {
-            "customer_id": f"scale_reg_{body.registration_id[:30]}",
-            "customer_name": (reg.get("name") or "SCALE Participant")[:60],
-            "customer_email": reg.get("email") or "support@scale.org.in",
-            # Cashfree requires a phone number in a valid format.
-            "customer_phone": (reg.get("phone") or "9999999999").replace(" ", "")[:15],
+        "amount": amount_paise,
+        "currency": "INR",
+        "receipt": f"scale_{body.registration_id[:30]}",
+        "notes": {
+            "registration_id": body.registration_id,
+            "event_id": reg["event_id"],
         },
-        "order_meta": {
-            "return_url": return_url,
-            "notify_url": notify_url,
-            "payment_methods": "upi,cc,dc,nb,app,paylater",
-        },
-        "order_note": f"SCALE — {event.get('title', '')}"[:200],
     }
     try:
         resp = requests.post(
-            f"{_cashfree_base_url()}/pg/orders",
-            json=payload, headers=headers, timeout=15,
+            _razorpay_api_url("/orders"),
+            json=payload,
+            headers=_razorpay_headers(),
+            auth=(key_id, key_secret),
+            timeout=15,
         )
     except Exception as e:
-        logger.error(f"Cashfree order create network error: {e}")
+        logger.error(f"Razorpay order create network error: {e}")
         raise HTTPException(status_code=502, detail="Payment gateway unreachable. Please try again.")
     if resp.status_code >= 400:
-        logger.error(f"Cashfree order create failed [{resp.status_code}]: {resp.text[:400]}")
+        logger.error(f"Razorpay order create failed [{resp.status_code}]: {resp.text[:400]}")
         raise HTTPException(status_code=502, detail="Could not create payment order.")
     data = resp.json()
-    payment_session_id = data.get("payment_session_id")
-    if not payment_session_id:
-        logger.error(f"Cashfree response missing payment_session_id: {data}")
+    order_id = data.get("id")
+    if not order_id:
+        logger.error(f"Razorpay response missing order id: {data}")
         raise HTTPException(status_code=502, detail="Invalid gateway response.")
 
     tx = PaymentTransaction(
-        session_id=order_id,  # we use Cashfree order_id as our session id
+        session_id=order_id,
         registration_id=body.registration_id,
         event_id=reg["event_id"],
         amount=amount_inr,
@@ -1567,8 +1535,7 @@ async def create_payment_order(body: CreateOrderRequest, request: Request):
             "registration_id": body.registration_id,
             "event_id": reg["event_id"],
             "student_email": reg.get("email", ""),
-            "cashfree_order_id": order_id,
-            "payment_session_id": payment_session_id,
+            "razorpay_order_id": order_id,
             "amount_paise": amount_paise,
         },
     )
@@ -1576,31 +1543,33 @@ async def create_payment_order(body: CreateOrderRequest, request: Request):
 
     return {
         "order_id": order_id,
-        "payment_session_id": payment_session_id,
+        "key_id": key_id,
         "amount_paise": amount_paise,
         "amount_inr": amount_inr,
         "currency": "INR",
-        "env": _cashfree_env(),
         "registration_id": body.registration_id,
+        "customer_name": reg.get("name") or "SCALE Participant",
+        "customer_email": reg.get("email") or "",
+        "customer_phone": reg.get("phone") or "",
     }
 
 
 async def _mark_registration_paid(reg_id: str, amount_inr: float, payment_id: str) -> None:
-    """Idempotent: mark registration paid + send confirmation emails. Safe to
-    call from both /payments/status (foreground) and /webhook/cashfree (async)."""
+    """Idempotent: mark registration paid + send confirmation emails."""
     reg = await db.registrations.find_one({"id": reg_id}, {"_id": 0})
     if not reg or reg.get("payment_status") == "paid":
         return
     await db.registrations.update_one(
-        {"id": reg_id}, {"$set": {"payment_status": "paid", "paid_at": now_iso(), "cashfree_payment_id": payment_id}}
+        {"id": reg_id},
+        {"$set": {"payment_status": "paid", "paid_at": now_iso(), "razorpay_payment_id": payment_id}},
     )
     event = await db.events.find_one({"id": reg.get("event_id")}, {"_id": 0})
     rows = [
         ("Event", event["title"] if event else "-"),
         ("Student", reg.get("name", "-")),
-        ("Amount", f"₹{int(amount_inr)}"),
-        ("Cashfree Payment ID", payment_id),
-        ("Status", "PAID ✓"),
+        ("Amount", f"INR {int(amount_inr)}"),
+        ("Razorpay Payment ID", payment_id),
+        ("Status", "PAID"),
     ]
     html = _email_html_table(
         "Payment Confirmed",
@@ -1608,21 +1577,57 @@ async def _mark_registration_paid(reg_id: str, amount_inr: float, payment_id: st
         intro=f"Hi {reg.get('name', '')}, your payment for <strong>{event['title'] if event else ''}</strong> has been confirmed. We'll be in touch with event details closer to the date.",
     )
     if reg.get("email"):
-        send_email(reg["email"], reg.get("name", ""), "SCALE — Payment Confirmed ✓", html)
+        send_email(reg["email"], reg.get("name", ""), "SCALE - Payment Confirmed", html)
     if reg.get("parent_email"):
-        send_email(reg["parent_email"], reg.get("parent_name", ""), f"SCALE — Payment Confirmed for {reg.get('name', '')}", html)
-    notify_admin(f"PAID — {reg.get('name', '')} → {event['title'] if event else ''}", html)
+        send_email(reg["parent_email"], reg.get("parent_name", ""), f"SCALE - Payment Confirmed for {reg.get('name', '')}", html)
+    notify_admin(f"PAID - {reg.get('name', '')} -> {event['title'] if event else ''}", html)
+
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
+
+
+@api_router.post("/payments/verify")
+async def verify_payment(body: VerifyPaymentRequest):
+    _, key_secret = _razorpay_auth()
+    signed = f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode("utf-8")
+    expected = _hmac.new(key_secret.encode("utf-8"), signed, _hashlib.sha256).hexdigest()
+    if not _hmac.compare_digest(expected, body.razorpay_signature):
+        raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+    tx = await db.payment_transactions.find_one({"session_id": body.razorpay_order_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    await db.payment_transactions.update_one(
+        {"session_id": body.razorpay_order_id},
+        {"$set": {
+            "payment_status": "paid",
+            "status": "captured",
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "updated_at": now_iso(),
+        }},
+    )
+    if tx.get("registration_id"):
+        await _mark_registration_paid(tx["registration_id"], float(tx.get("amount", 0.0)), body.razorpay_payment_id)
+
+    return {
+        "ok": True,
+        "payment_status": "paid",
+        "order_id": body.razorpay_order_id,
+        "payment_id": body.razorpay_payment_id,
+    }
 
 
 @api_router.get("/payments/status/{order_id}")
 async def get_payment_status(order_id: str):
-    """Status check used by PaymentSuccessPage polling. Calls Cashfree's
-    Get-Order API to fetch the authoritative state, then reconciles our DB."""
+    """Status check used by PaymentSuccessPage polling."""
     tx = await db.payment_transactions.find_one({"session_id": order_id}, {"_id": 0})
     if not tx:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    # Short-circuit if already paid — no need to call gateway.
     if tx.get("payment_status") == "paid":
         return {
             "payment_status": "paid",
@@ -1631,11 +1636,16 @@ async def get_payment_status(order_id: str):
             "currency": tx.get("currency", "inr"),
         }
 
-    headers = _cashfree_headers()
+    key_id, key_secret = _razorpay_auth()
     try:
-        resp = requests.get(f"{_cashfree_base_url()}/pg/orders/{order_id}", headers=headers, timeout=10)
+        resp = requests.get(
+            _razorpay_api_url(f"/orders/{order_id}"),
+            headers=_razorpay_headers(),
+            auth=(key_id, key_secret),
+            timeout=10,
+        )
     except Exception as e:
-        logger.warning(f"Cashfree status fetch network error: {e}")
+        logger.warning(f"Razorpay status fetch network error: {e}")
         return {
             "payment_status": tx.get("payment_status", "created"),
             "status": tx.get("status", "open"),
@@ -1646,7 +1656,7 @@ async def get_payment_status(order_id: str):
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail="Order not found at gateway")
     if resp.status_code >= 400:
-        logger.error(f"Cashfree status error [{resp.status_code}]: {resp.text[:300]}")
+        logger.error(f"Razorpay status error [{resp.status_code}]: {resp.text[:300]}")
         return {
             "payment_status": tx.get("payment_status", "created"),
             "status": tx.get("status", "open"),
@@ -1655,37 +1665,39 @@ async def get_payment_status(order_id: str):
             "note": "pending_external_confirmation",
         }
     data = resp.json()
-    order_status = data.get("order_status")  # PAID, ACTIVE, EXPIRED, TERMINATED, TERMINATION_REQUESTED
-    # Normalise to our internal vocabulary.
-    if order_status == "PAID":
+    order_status = (data.get("status") or "").lower()
+    if order_status == "paid":
         new_payment_status, new_status = "paid", "captured"
-    elif order_status in {"EXPIRED", "TERMINATED"}:
-        new_payment_status, new_status = "expired", "expired"
-    elif order_status == "ACTIVE":
+    elif order_status in {"created", "attempted"}:
         new_payment_status, new_status = "created", "open"
     else:
         new_payment_status, new_status = tx.get("payment_status", "created"), tx.get("status", "open")
 
-    # Fetch payments list for this order to get the Cashfree payment id.
-    cashfree_payment_id = None
+    razorpay_payment_id = None
     try:
-        pays_resp = requests.get(f"{_cashfree_base_url()}/pg/orders/{order_id}/payments", headers=headers, timeout=10)
+        pays_resp = requests.get(
+            _razorpay_api_url(f"/orders/{order_id}/payments"),
+            headers=_razorpay_headers(),
+            auth=(key_id, key_secret),
+            timeout=10,
+        )
         if pays_resp.status_code == 200:
             payments = pays_resp.json() or []
             for p in payments:
-                if p.get("payment_status") == "SUCCESS":
-                    cashfree_payment_id = p.get("cf_payment_id") or p.get("bank_reference") or ""
+                if (p.get("status") or "").lower() == "captured":
+                    razorpay_payment_id = p.get("id") or ""
+                    new_payment_status, new_status = "paid", "captured"
                     break
     except Exception as e:
-        logger.warning(f"Cashfree payments fetch failed (non-fatal): {e}")
+        logger.warning(f"Razorpay payments fetch failed (non-fatal): {e}")
 
     update = {"payment_status": new_payment_status, "status": new_status, "updated_at": now_iso()}
-    if cashfree_payment_id:
-        update["cashfree_payment_id"] = cashfree_payment_id
+    if razorpay_payment_id:
+        update["razorpay_payment_id"] = razorpay_payment_id
     await db.payment_transactions.update_one({"session_id": order_id}, {"$set": update})
 
     if new_payment_status == "paid" and tx.get("payment_status") != "paid" and tx.get("registration_id"):
-        await _mark_registration_paid(tx["registration_id"], float(tx.get("amount", 0.0)), cashfree_payment_id or "")
+        await _mark_registration_paid(tx["registration_id"], float(tx.get("amount", 0.0)), razorpay_payment_id or "")
 
     return {
         "payment_status": new_payment_status,
@@ -1695,28 +1707,22 @@ async def get_payment_status(order_id: str):
     }
 
 
-@api_router.post("/webhook/cashfree")
-async def cashfree_webhook(request: Request):
-    """Cashfree → us. Signature = HMAC-SHA256(webhook_secret, timestamp + raw_body).
-    Accepts all event types; persists reconciliation for PAYMENT_SUCCESS_WEBHOOK
-    and PAYMENT_FAILED_WEBHOOK. Always returns 200 to acknowledge."""
+@api_router.post("/webhook/razorpay")
+async def razorpay_webhook(request: Request):
+    """Razorpay -> us. Signature = HMAC-SHA256 over raw_body using webhook secret."""
     raw = await request.body()
-    signature = request.headers.get("x-webhook-signature", "")
-    timestamp = request.headers.get("x-webhook-timestamp", "")
-    secret = os.environ.get("CASHFREE_WEBHOOK_SECRET")
+    signature = request.headers.get("x-razorpay-signature", "")
+    secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET")
     if not secret:
-        logger.warning("Cashfree webhook received but CASHFREE_WEBHOOK_SECRET not set; skipping.")
+        logger.warning("Razorpay webhook received but RAZORPAY_WEBHOOK_SECRET not set; skipping.")
         return {"received": True}
-    if not signature or not timestamp:
-        logger.warning("Cashfree webhook missing signature/timestamp headers")
-        raise HTTPException(status_code=400, detail="Missing signature headers")
+    if not signature:
+        logger.warning("Razorpay webhook missing signature header")
+        raise HTTPException(status_code=400, detail="Missing signature header")
 
-    signed_payload = (timestamp + raw.decode("utf-8", errors="replace")).encode("utf-8")
-    expected = base64.b64encode(
-        _hmac.new(secret.encode("utf-8"), signed_payload, _hashlib.sha256).digest()
-    ).decode()
+    expected = _hmac.new(secret.encode("utf-8"), raw, _hashlib.sha256).hexdigest()
     if not _hmac.compare_digest(expected, signature):
-        logger.warning("Cashfree webhook: invalid signature")
+        logger.warning("Razorpay webhook: invalid signature")
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     import json as _json
@@ -1725,20 +1731,18 @@ async def cashfree_webhook(request: Request):
     except Exception:
         return {"received": True}
 
-    event_type = event.get("type") or event.get("event", "")
-    data = event.get("data") or {}
-    order = data.get("order") or {}
-    payment = data.get("payment") or {}
-    order_id = order.get("order_id") or data.get("order_id")
-    cashfree_payment_id = payment.get("cf_payment_id") or payment.get("payment_id") or ""
-    amount = float(payment.get("payment_amount") or order.get("order_amount") or 0.0)
+    event_type = event.get("event") or event.get("type", "")
+    payload = event.get("payload") or {}
+    payment_entity = ((payload.get("payment") or {}).get("entity") or {})
+    order_entity = ((payload.get("order") or {}).get("entity") or {})
+    order_id = payment_entity.get("order_id") or order_entity.get("id")
+    razorpay_payment_id = payment_entity.get("id") or ""
+    amount = float((payment_entity.get("amount") or order_entity.get("amount") or 0) / 100.0)
 
     if not order_id:
         return {"received": True}
 
-    if event_type in {"PAYMENT_SUCCESS_WEBHOOK", "PAYMENT_USER_DROPPED_WEBHOOK"} and (
-        payment.get("payment_status") == "SUCCESS" or event_type == "PAYMENT_SUCCESS_WEBHOOK"
-    ):
+    if event_type in {"payment.captured", "order.paid"}:
         tx = await db.payment_transactions.find_one({"session_id": order_id}, {"_id": 0})
         if tx and tx.get("payment_status") != "paid":
             await db.payment_transactions.update_one(
@@ -1746,19 +1750,18 @@ async def cashfree_webhook(request: Request):
                 {"$set": {
                     "payment_status": "paid",
                     "status": "captured",
-                    "cashfree_payment_id": cashfree_payment_id,
+                    "razorpay_payment_id": razorpay_payment_id,
                     "updated_at": now_iso(),
                 }},
             )
             if tx.get("registration_id"):
-                await _mark_registration_paid(tx["registration_id"], amount or float(tx.get("amount", 0.0)), cashfree_payment_id)
-    elif event_type == "PAYMENT_FAILED_WEBHOOK":
+                await _mark_registration_paid(tx["registration_id"], amount or float(tx.get("amount", 0.0)), razorpay_payment_id)
+    elif event_type == "payment.failed":
         await db.payment_transactions.update_one(
             {"session_id": order_id},
             {"$set": {"payment_status": "failed", "status": "failed", "updated_at": now_iso()}},
         )
     return {"received": True}
-
 @api_router.get("/")
 async def root():
     return {"message": "SCALE India API"}
@@ -1773,3 +1776,5 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+

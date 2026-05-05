@@ -26,9 +26,9 @@ Multi-page website for SCALE — India's first national high-school student org 
 
 ## Implemented (updated 2026-02 — Iteration 9 through 12)
 ### Iteration 13 — Cashfree replaces Razorpay
-- Cashfree Payment Gateway v3 (API version 2023-08-01) replaces Razorpay end-to-end. Flow: backend creates Order → returns `payment_session_id` → frontend opens `window.Cashfree({mode}).checkout({paymentSessionId, redirectTarget:'_self'})` → Cashfree redirects to `/payment-success?session_id=<order_id>&reg=<reg_id>` → `PaymentSuccessPage` polls `GET /api/payments/status/<order_id>` which calls Cashfree's `/pg/orders/{id}` to fetch authoritative status and (if PAID) marks the registration + sends confirmation emails.
-- Backend routes: `POST /api/payments/create-order` (idempotent, reuses existing unpaid order), `GET /api/payments/status/{order_id}` (reads Cashfree's order + payments APIs, normalises status), `POST /api/webhook/cashfree` (HMAC-SHA256 over `timestamp + raw_body`, handles `PAYMENT_SUCCESS_WEBHOOK` / `PAYMENT_FAILED_WEBHOOK`).
-- Env vars: `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_WEBHOOK_SECRET`, `CASHFREE_ENV=TEST|PROD` (base URL toggles between `sandbox.cashfree.com` and `api.cashfree.com`). Routes cleanly 503 with "Payment gateway not configured" until admin fills in APP_ID + SECRET_KEY.
+- Razorpay Standard Checkout powers payments. Backend creates Orders, frontend opens checkout.js, successful payments are verified server-side, and webhooks reconcile async updates.
+- Backend routes: `POST /api/payments/create-order`, `POST /api/payments/verify`, `GET /api/payments/status/{order_id}`, `POST /api/webhook/razorpay`.
+- Env vars: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`. Routes cleanly 503 with a payment gateway not configured message until admin fills them in.
 - Razorpay SDK removed (`razorpay==2.0.1` uninstalled). Razorpay env vars dropped from `.env`.
 
 ### Iteration 12 — Post-Registration Event Hub
@@ -75,3 +75,4 @@ Multi-page website for SCALE — India's first national high-school student org 
 1. Mobile polish on registration-closed state.
 2. Validate the "scale-plus" page content with the user; offer to seed a starter SCALE+ page on request.
 3. Add gallery/video block types if user requests richer pages.
+

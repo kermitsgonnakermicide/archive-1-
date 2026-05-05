@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 export const API = `${BACKEND_URL}/api`;
 const BASE_URL = BACKEND_URL;
 
@@ -72,6 +72,7 @@ export const submissionsApi = {
 export const paymentsApi = {
   createOrder: (registration_id) =>
     api.post("/payments/create-order", { registration_id }).then((r) => r.data),
+  verify: (payload) => api.post("/payments/verify", payload).then((r) => r.data),
   status: (order_id) => api.get(`/payments/status/${order_id}`).then((r) => r.data),
 };
 

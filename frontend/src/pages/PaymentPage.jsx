@@ -5,23 +5,23 @@ import { toast } from "sonner";
 import { LOGO_URL } from "../lib/brand";
 import { CreditCard, Smartphone, Loader2 } from "lucide-react";
 
-const CASHFREE_SDK = "https://sdk.cashfree.com/js/v3/cashfree.js";
+const RAZORPAY_SDK = "https://checkout.razorpay.com/v1/checkout.js";
 
-function loadCashfreeScript() {
+function loadRazorpayScript() {
   return new Promise((resolve) => {
-    if (window.Cashfree) return resolve(true);
-    const existing = document.querySelector(`script[src="${CASHFREE_SDK}"]`);
+    if (window.Razorpay) return resolve(true);
+    const existing = document.querySelector(`script[src="${RAZORPAY_SDK}"]`);
     if (existing) {
-      existing.addEventListener("load", () => resolve(!!window.Cashfree));
+      existing.addEventListener("load", () => resolve(!!window.Razorpay));
       existing.addEventListener("error", () => resolve(false));
       return;
     }
-    const s = document.createElement("script");
-    s.src = CASHFREE_SDK;
-    s.async = true;
-    s.onload = () => resolve(!!window.Cashfree);
-    s.onerror = () => resolve(false);
-    document.body.appendChild(s);
+    const script = document.createElement("script");
+    script.src = RAZORPAY_SDK;
+    script.async = true;
+    script.onload = () => resolve(!!window.Razorpay);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
   });
 }
 
@@ -33,20 +33,25 @@ export default function PaymentPage() {
 
   useEffect(() => {
     (async () => {
-      try { setReg(await registrationsApi.get(registrationId)); }
-      catch { toast.error("Registration not found."); navigate("/"); }
+      try {
+        setReg(await registrationsApi.get(registrationId));
+      } catch {
+        toast.error("Registration not found.");
+        navigate("/");
+      }
     })();
-    loadCashfreeScript();
+    loadRazorpayScript();
   }, [registrationId, navigate]);
 
   const initiate = useCallback(async () => {
     setBusy(true);
-    const sdkOk = await loadCashfreeScript();
-    if (!sdkOk || !window.Cashfree) {
+    const sdkOk = await loadRazorpayScript();
+    if (!sdkOk || !window.Razorpay) {
       toast.error("Payment SDK failed to load. Check your internet and try again.");
       setBusy(false);
       return;
     }
+
     let order;
     try {
       order = await paymentsApi.createOrder(registrationId);
@@ -55,33 +60,60 @@ export default function PaymentPage() {
       setBusy(false);
       return;
     }
-    if (!order?.payment_session_id) {
+
+    if (!order?.order_id || !order?.key_id) {
       toast.error("Payment gateway not configured. Please contact support.");
       setBusy(false);
       return;
     }
+
     try {
-      // Cashfree v3 drop-in. Mode = "sandbox" for TEST, "production" for PROD.
-      const mode = (order.env || "TEST").toUpperCase() === "PROD" ? "production" : "sandbox";
-      const cashfree = window.Cashfree({ mode });
-      cashfree.checkout({
-        paymentSessionId: order.payment_session_id,
-        redirectTarget: "_self",  // redirect back to our return_url
+      const razorpay = new window.Razorpay({
+        key: order.key_id,
+        amount: order.amount_paise,
+        currency: order.currency || "INR",
+        name: "SCALE India",
+        description: reg?.event_title || "Event Registration",
+        image: `${window.location.origin}${LOGO_URL}`,
+        order_id: order.order_id,
+        prefill: {
+          name: order.customer_name || reg?.name || "",
+          email: order.customer_email || reg?.email || "",
+          contact: order.customer_phone || reg?.phone || "",
+        },
+        notes: {
+          registration_id: registrationId,
+        },
+        theme: {
+          color: "#B01020",
+        },
+        handler: async (response) => {
+          try {
+            await paymentsApi.verify(response);
+            navigate(`/payment-success?session_id=${order.order_id}&reg=${registrationId}`);
+          } catch (err) {
+            toast.error(err?.response?.data?.detail || "Payment verification failed.");
+            setBusy(false);
+          }
+        },
+        modal: {
+          ondismiss: () => setBusy(false),
+        },
       });
-      // On redirect the browser navigates away; no further JS runs here.
-    } catch (e) {
+      razorpay.open();
+    } catch {
       toast.error("Could not open checkout. Please try again.");
       setBusy(false);
     }
-  }, [registrationId]);
+  }, [navigate, reg, registrationId]);
 
-  if (!reg) return <div className="min-h-screen flex items-center justify-center">Loading…</div>;
+  if (!reg) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   if (reg.payment_status === "paid") {
     return (
       <div className="min-h-screen flex items-center justify-center hero-bg px-6 pt-20">
         <div className="bg-white p-8 max-w-md w-full text-center" data-testid="payment-already-paid">
-          <div className="text-5xl mb-3">✓</div>
+          <div className="text-5xl mb-3">OK</div>
           <h1 className="font-serif font-black text-3xl mb-2">Payment already complete</h1>
           <p className="text-sm text-black/70 mb-5">Your spot for {reg.event_title} is confirmed.</p>
           <button onClick={() => navigate("/")} className="btn-crimson w-full justify-center">Back to home</button>
@@ -113,13 +145,13 @@ export default function PaymentPage() {
           </div>
           <div className="border-t border-b border-black/10 py-4 mb-6 flex items-center justify-between">
             <span className="font-serif text-base">Total payable</span>
-            <span className="font-serif font-black text-3xl text-[var(--scale-crimson)]">₹{Math.round(reg.amount_inr || 500)}</span>
+            <span className="font-serif font-black text-3xl text-[var(--scale-crimson)]">INR {Math.round(reg.amount_inr || 500)}</span>
           </div>
           <div className="flex items-center gap-3 mb-5 text-xs text-black/60 flex-wrap">
             <span className="flex items-center gap-1"><Smartphone size={14} /> UPI</span>
             <span className="flex items-center gap-1"><CreditCard size={14} /> Cards</span>
-            <span>· Netbanking · Wallets</span>
-            <span className="ml-auto">Powered by Cashfree</span>
+            <span>Netbanking and Wallets</span>
+            <span className="ml-auto">Powered by Razorpay</span>
           </div>
           <button
             onClick={initiate}
@@ -127,10 +159,10 @@ export default function PaymentPage() {
             className="btn-crimson w-full justify-center"
             data-testid="payment-initiate-btn"
           >
-            {busy ? <><Loader2 className="animate-spin" size={14} /> Redirecting…</> : "Pay Securely"}
+            {busy ? <><Loader2 className="animate-spin" size={14} /> Opening checkout...</> : "Pay Securely"}
           </button>
           <p className="text-xs text-black/50 mt-3 text-center">
-            You'll be redirected to Cashfree's secure checkout — UPI, cards, netbanking, and wallets supported.
+            You'll be redirected to Razorpay's secure checkout. UPI, cards, netbanking, and wallets are supported.
           </p>
         </div>
       </div>
